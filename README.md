@@ -37,4 +37,4 @@ Release 0.1
    - In Home Assistant import `dashboard.yaml` to create a dashboard.
 
 ## Contributing
-Currrently not open for contributions.
+Currrently not open for contributions. Any issues can be reported in this repository.
