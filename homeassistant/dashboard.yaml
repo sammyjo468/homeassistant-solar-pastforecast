@@ -1,0 +1,489 @@
+views:
+  - type: sections
+    path: home-battery-control
+    max_columns: 3
+    title: Home
+    icon: mdi:solar-power-variant-outline
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Solar Pastcast & Forecast
+            heading_style: title
+          - type: vertical-stack
+            grid_options:
+              columns: full
+            cards:
+              - type: custom:apexcharts-card
+                update_interval: 5min
+                grid_options:
+                  columns: full
+                graph_span: 48h
+                span:
+                  start: hour
+                  offset: '-24h'
+                header:
+                  show: true
+                  show_states: false
+                  colorize_states: true
+                now:
+                  show: true
+                  color: '#ff4444'
+                apex_config:
+                  xaxis:
+                    type: datetime
+                    tickAmount: 16
+                    forceNiceScale: false
+                    labels:
+                      show: true
+                      rotate: -45
+                      rotateAlways: true
+                      hideOverlappingLabels: true
+                      trim: false
+                      datetimeFormatter:
+                        hour: HH:mm
+                      style:
+                        fontSize: 11px
+                    axisTicks:
+                      show: true
+                  yaxis:
+                    - decimalsInFloat: 0
+                  legend:
+                    show: true
+                    position: bottom
+                    offsetY: 20
+                    itemMargin:
+                      horizontal: 20
+                    inverseOrder: true
+                    formatter: |
+                      EVAL:function(seriesName, opts) {
+                        return seriesName; 
+                      }
+                series:
+                  - entity: sensor.solar_power_pastforecast_watts
+                    name: Pastcast & Forecast
+                    unit: W
+                    color: gold
+                    type: area
+                    data_generator: >
+                      const mydata = entity.attributes.hourly_data; if (!mydata)
+                      return []; return mydata.map((item) => {
+                        // item[0] is the ISO timestamp from the API (e.g., "2026-01-31T01:00")
+                        // item[1] is the wattage
+                        return [new Date(item[0]).getTime(), item[1]];
+                      });
+                  - entity: sensor.solaredge_i1_ac_power
+                    name: Produced
+                    unit: W
+                    color: '#0000FF'
+                    type: line
+                    stroke_width: 5
+                    extend_to: false
+                    group_by:
+                      func: avg
+                      duration: 60min
+                  - entity: sensor.theoretical_clear_sky_power_forecast
+                    name: Theoretical maximum
+                    unit: W
+                    color: green
+                    type: line
+                    stroke_width: 3
+                    curve: smooth
+                    extend_to: false
+                    group_by:
+                      func: max
+                    show:
+                      legend_value: false
+                    opacity: 0.7
+                    data_generator: >
+                      const mydata = entity.attributes.hourly_data; if (!mydata)
+                      return []; return mydata.map((item) => {
+                        // item[0] is the ISO timestamp from the API (e.g., "2026-01-31T01:00")
+                        // item[1] is the wattage
+                        return [new Date(item[0]).getTime(), item[1]];
+                      });
+              - type: glance
+                entities:
+                  - entity: sensor.solar_energy_pastcast_24h
+                    name: 24h Pastcast
+                    icon: mdi:history
+                  - entity: sensor.solaredge_production_24h
+                    name: 24h Production
+                    icon: mdi:calendar-check-outline
+                  - entity: sensor.solaredge_relative_production_vs_pastcast
+                    name: Past relative performance
+                    icon: mdi:scale-balance
+                  - entity: sensor.solar_energy_forecast_24h
+                    name: 24h Forecast
+                    icon: mdi:update
+        column_span: 2
+      - type: grid
+        cards:
+          - type: heading
+            heading: Solar Setup
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: input_boolean.solar_settings_lock
+                name: Lock Settings
+                icon: mdi:lock-open-variant
+              - type: section
+              - entity: input_number.solar_panel_count1
+              - entity: input_number.solar_tilt1
+              - entity: input_number.solar_azimuth1
+              - entity: input_number.solar_panel_count2
+              - entity: input_number.solar_tilt2
+              - entity: input_number.solar_azimuth2
+              - entity: input_number.solar_panel_wp
+              - entity: input_number.solar_temp_coefficient
+                icon: mdi:sun-thermometer-outline
+              - entity: input_number.solar_loss_factor
+              - entity: input_number.solar_offset
+              - type: button
+                name: Refresh Solar Forecast
+                icon: mdi:refresh
+                tap_action:
+                  action: perform-action
+                  perform_action: homeassistant.update_entity
+                  target:
+                    entity_id:
+                      - sensor.knmi_master_data_array_1
+                      - sensor.knmi_master_data_array_2
+                      - sensor.solar_power_forecast_watts
+                      - sensor.solar_energy_forecast_24h
+            card_mod:
+              style:
+                .: |
+                  #states > *:nth-child(n+2) {
+                    {% if is_state('input_boolean.solar_settings_lock', 'on') %}
+                      opacity: 0.3 !important;
+                      pointer-events: none !important;
+                      filter: grayscale(100%);
+                    {% endif %}
+                    transition: all 0.4s ease;
+                  }
+      - type: grid
+        cards:
+          - show_name: false
+            show_icon: true
+            type: button
+            show_state: false
+            icon: ''
+            entity: input_boolean.solar_reading_guide_lock
+        column_span: 1
+      - type: grid
+        cards:
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: input_boolean.solar_reading_guide_lock
+                state: 'on'
+            card:
+              type: markdown
+              content: >-
+                This panel shows the expected future 24h production of the solar
+                panels according to the *Global Tilted Irradiation* for this
+                specific solar PV setup.
+
+
+                The left side of the graph shows the past production of this
+                solar PV setup. It is compared to what it should have been. The
+                'Past relative performance' should ideally be ~100% over the
+                long run. It can be calibrated with the settings.
+
+
+                Expect larger offsets in the ex-post data when solar radiation
+                levels have been low.
+
+
+                Source of external data: https://open-meteo.com
+
+
+                In this version of ABC the applied model is limited to
+                'knmi_harmonie_arome_netherlands'. This has a resolution of 2
+                Km.
+      - type: grid
+        cards:
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: input_boolean.solar_reading_guide_lock
+                state: 'on'
+            card:
+              type: markdown
+              content: >
+                Up to 2 arrays can be defined. These settings should be
+                considered static. Only the Loss Factor and Offset should be
+                used for calibration.
+
+                - Temperature effects can be significant, but are taking into
+                account with imported local weather data.
+
+                - The Solar Loss Factor should ideally be ~2%, but in practise
+                significantly higher due to degradation of panels, inverter
+                and/or shading effects.
+
+                - The Solar Offset defines the fixed irradiance loss per panel.
+                This can be used to model the relative inefficiency of a panel
+                for diffuse irradiance compared to direct irradiance.
+
+                - In rare cases, the 'Refresh Solar Forecast' can be applied to
+                load new data, if necessary.
+              card_mod:
+                style:
+                  ha-markdown:
+                    $: |
+                      /* Target the internal list container */
+                      ha-markdown-element ul {
+                        margin: 0 !important;
+                        padding-left: 12px !important; /* Adjust this to move left/right */
+                      }
+                      /* Target the individual items */
+                      ha-markdown-element li {
+                        margin-left: 0 !important;
+                      }
+                  .: |
+                    ha-card {
+                      --ha-card-horizontal-padding: 0px; /* Standard is 16px */
+                    }
+    badges:
+      - type: entity
+        show_name: true
+        show_state: true
+        show_icon: true
+        entity: sensor.knmi_sunrise_clock_time
+        color: yellow
+        show_entity_picture: false
+        name: Sunrise
+      - type: entity
+        show_name: true
+        show_state: true
+        show_icon: true
+        entity: sensor.knmi_sunset_clock_time
+        icon: mdi:weather-sunset-down
+        color: accent
+        name: Sunset
+    header:
+      card:
+        type: markdown
+        content: '# Solar PV Production Forecast'
+        text_only: true
+      layout: start
+      badges_position: bottom
+      badges_wrap: wrap
+    cards: []
+    subview: false
+  - type: sections
+    max_columns: 3
+    icon: mdi:power-socket-eu
+    path: discharge-planning
+    title: Discharge planning
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Hourly Median Consumption
+            heading_style: title
+            grid_options:
+              rows: 1
+          - type: custom:apexcharts-card
+            grid_options:
+              columns: full
+              aspect_ratio: '1:1'
+            graph_span: 24h
+            span:
+              start: day
+            series:
+              - entity: sensor.hourly_median_energy_consumption
+                type: column
+                data_generator: >
+                  if (!entity || !entity.attributes ||
+                  !entity.attributes.hourly_data) return [];
+
+                  const now = new Date();
+
+                  return entity.attributes.hourly_data.map((item) => {
+                    // Points to the median inside the attributes of each hour
+                    return [new Date(now.getFullYear(), now.getMonth(), now.getDate(), item.hour, 30, 0).getTime(), item.attributes.median];
+                  });
+                unit: Wh
+                color: '#3498db'
+            apex_config:
+              grid:
+                padding:
+                  left: 0
+                  right: 0
+              xaxis:
+                title:
+                  text: Hour
+                type: datetime
+                labels:
+                  show: true
+                  rotate: 0
+                  formatter: |
+                    EVAL:function(val) {
+                      const date = new Date(val);
+                      const hour = date.getHours();
+                      if (hour % 2 === 0) return hour;
+                      return '';
+                    }
+                tickAmount: 12
+                axisTicks:
+                  show: true
+                axisBorder:
+                  show: true
+                  color: '#777'
+              yaxis:
+                - title:
+                    text: Energy (Wh)
+                  min: 0
+                  forceNiceScale: true
+                  decimalsInFloat: 0
+                  axisBorder:
+                    show: true
+                    color: '#777'
+                - opposite: true
+                  labels:
+                    show: false
+                  axisBorder:
+                    show: true
+                    color: '#777'
+              plotOptions:
+                bar:
+                  columnWidth: 90%
+                  borderRadius: 2
+        column_span: 1
+      - type: grid
+        cards: []
+      - type: grid
+        cards:
+          - type: heading
+            heading: Solar Balance Forecast
+            heading_style: title
+          - type: custom:apexcharts-card
+            grid_options:
+              columns: full
+              aspect_ratio: '1:1'
+            graph_span: 24h
+            stacked: true
+            span:
+              start: hour
+            series:
+              - entity: sensor.hourly_baseline
+                name: Grid Import
+                type: column
+                color: '#e74c3c'
+                data_generator: >-
+                  const solar =
+                  hass.states['sensor.solar_power_pastforecast_watts'];
+
+                  if (!entity || !entity.attributes ||
+                  !entity.attributes.hourly_baseline || !solar ||
+                  !solar.attributes.hourly_data) return [];
+
+                  const now = new Date();
+
+                  return entity.attributes.hourly_baseline.map((item) => {
+                    const h = Number(item.hour);
+                    let tsChart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, 30, 0).getTime();
+                    // If bucket hour is earlier than current hour, it belongs to Tomorrow in a rolling 24h view
+                    if (h < now.getHours()) tsChart += 86400000;
+                    const bVal = Number(item.average) || 0;
+                    // Sensor shift: look for tsChart - 1.5h
+                    const targetT = tsChart - 5400000;
+                    const sEntry = solar.attributes.hourly_data.find(x => Math.abs(new Date(x[0]).getTime() - targetT) < 600000);
+                    const sVal = sEntry ? Number(sEntry[1]) || 0 : 0;
+                    return [tsChart, Math.max(0, bVal - sVal)];
+                  });
+              - entity: sensor.hourly_baseline
+                name: Consumed Solar
+                type: column
+                color: '#f1c40f'
+                data_generator: >-
+                  const solar =
+                  hass.states['sensor.solar_power_pastforecast_watts'];
+
+                  if (!entity || !entity.attributes ||
+                  !entity.attributes.hourly_baseline || !solar ||
+                  !solar.attributes.hourly_data) return [];
+
+                  const now = new Date();
+
+                  return entity.attributes.hourly_baseline.map((item) => {
+                    const h = Number(item.hour);
+                    let tsChart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, 30, 0).getTime();
+                    if (h < now.getHours()) tsChart += 86400000;
+                    const bVal = Number(item.average) || 0;
+                    const targetT = tsChart - 5400000;
+                    const sEntry = solar.attributes.hourly_data.find(x => Math.abs(new Date(x[0]).getTime() - targetT) < 600000);
+                    const sVal = sEntry ? Number(sEntry[1]) || 0 : 0;
+                    return [tsChart, Math.min(bVal, sVal)];
+                  });
+              - entity: sensor.hourly_baseline
+                name: Unconsumed Solar
+                type: column
+                color: '#2ecc71'
+                data_generator: >-
+                  const solar =
+                  hass.states['sensor.solar_power_pastforecast_watts'];
+
+                  if (!entity || !entity.attributes ||
+                  !entity.attributes.hourly_baseline || !solar ||
+                  !solar.attributes.hourly_data) return [];
+
+                  const now = new Date();
+
+                  return entity.attributes.hourly_baseline.map((item) => {
+                    const h = Number(item.hour);
+                    let tsChart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, 30, 0).getTime();
+                    if (h < now.getHours()) tsChart += 86400000;
+                    const bVal = Number(item.average) || 0;
+                    const targetT = tsChart - 5400000;
+                    const sEntry = solar.attributes.hourly_data.find(x => Math.abs(new Date(x[0]).getTime() - targetT) < 600000);
+                    const sVal = sEntry ? Number(sEntry[1]) || 0 : 0;
+                    return [tsChart, Math.max(0, sVal - bVal)];
+                  });
+            apex_config:
+              legend:
+                show: true
+                formatter: EVAL:function(seriesName, opts) { return seriesName; }
+              grid:
+                padding:
+                  left: 0
+                  right: 0
+              xaxis:
+                title:
+                  text: Hours ahead
+                labels:
+                  show: true
+                  rotate: 0
+                  formatter: |
+                    EVAL:function(val) {
+                      const now = new Date();
+                      const startHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 0, 0).getTime();
+                      const diff = Math.round((val - startHour) / 3600000);
+                      if (diff >= 0 && diff % 2 === 0) return '+' + diff + 'h';
+                      return '';
+                    }
+                tickAmount: 12
+                type: datetime
+                axisTicks:
+                  show: true
+                axisBorder:
+                  show: true
+                  color: '#777'
+              yaxis:
+                title:
+                  text: Power (W)
+                min: 0
+                forceNiceScale: true
+                decimalsInFloat: 0
+                axisBorder:
+                  show: true
+                  color: '#777'
+              plotOptions:
+                bar:
+                  columnWidth: 90%
+                  borderRadius: 2
+        column_span: 2

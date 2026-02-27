@@ -1,0 +1,536 @@
+# Advanced Home Battery SoC Controller
+#
+# Version 0.1 / 12-02-2026
+# sammygo468
+#
+
+###########################################################################################################
+# BOOLEAN
+###########################################################################################################
+
+input_boolean:
+  # Dashboard operations
+  solar_settings_lock:
+    name: Solar Settings Lock
+    icon: mdi:lock
+    initial: false
+
+  solar_reading_guide_lock:
+    name: Solar Reading Guide Lock
+    icon: mdi:book-open-page-variant-outline
+    initial: false
+
+###########################################################################################################
+# INPUT NUMBER
+###########################################################################################################
+
+input_number:
+  solar_panel_count1:
+    name: "Number of Panels Array 1"
+    min: 1
+    max: 50
+    step: 1
+    mode: box
+    icon: mdi:solar-panel
+
+  solar_tilt1:
+    name: "Tilt Array 1"
+    min: 0
+    max: 90
+    step: 1
+    mode: box
+    unit_of_measurement: "\u00b0"
+    icon: mdi:solar-panel
+
+  solar_azimuth1:
+    name: "Azimuth Array 1"
+    min: -180
+    max: 180
+    step: 1
+    mode: box
+    unit_of_measurement: "\u00b0"
+    icon: mdi:solar-panel
+    
+  solar_panel_count2:
+    name: "Number of Panels Array 2"
+    min: 1
+    max: 50
+    step: 1
+    mode: box
+    icon: mdi:solar-panel
+
+  solar_tilt2:
+    name: "Tilt Array 2"
+    min: 0
+    max: 90
+    step: 1
+    mode: box
+    unit_of_measurement: "\u00b0"
+    icon: mdi:solar-panel
+
+  solar_azimuth2:
+    name: "Azimuth Array 2"
+    min: -180
+    max: 180
+    step: 1
+    mode: box
+    unit_of_measurement: "\u00b0"
+    icon: mdi:solar-panel
+    
+  solar_panel_wp:
+    name: "Panel Watt-Peak (Wp)"
+    min: 200
+    max: 600
+    step: 5
+    mode: box
+    unit_of_measurement: "Wp"
+    icon: mdi:lightning-bolt
+
+  solar_temp_coefficient:
+    name: "Temperature Coefficient"
+    min: -1.0
+    max: 0.0
+    step: 0.01
+    mode: box
+    unit_of_measurement: "%/K"
+    icon: mdi:percent
+
+  solar_loss_factor:
+    name: "Solar Loss Factor"
+    min: 0.0
+    max: 99.0
+    step: 0.1
+    mode: box
+    unit_of_measurement: "%"
+    icon: mdi:percent
+
+  solar_offset:
+    name: "Solar Offset"
+    min: 0.0
+    max: 200.0
+    step: 1
+    mode: box
+    unit_of_measurement: "W/m2"
+    icon: mdi:solar-power-variant
+
+###########################################################################################################
+# AUTOMATIONS
+###########################################################################################################
+
+automation:
+  - alias: "HA startup event"
+    trigger:
+      - platform: homeassistant
+        event: start
+    action:
+      - event: nodered_startup_trigger
+        event_data: {}
+
+###########################################################################################################
+# STATISTICS HELPERS
+###########################################################################################################
+
+sensor:
+  - platform: statistics
+    name: "Solaredge Production 24h"
+    entity_id: sensor.solaredge_i1_ac_energy # Your total lifetime energy sensor
+    state_characteristic: change
+    max_age:
+      hours: 24
+    sampling_size: 20000 # Increase this if your inverter updates very frequently
+    precision: 2
+
+##########################################################################################################
+# API RESTful
+###########################################################################################################
+
+rest:
+  # --- ARRAY 1: Fetches ALL weather data + Solar Array 1 ---
+  # azimuth here is in -180 to +180 coordinate system from south
+  # this api takes past 24 hours up until the beginning of the current hour, and 30 hours starting of the beginning of the current hour. This gives room for delayed API data.
+  - resource_template: >
+      {% set lat = state_attr('zone.home', 'latitude') | default(52.000, true) %}
+      {% set lon = state_attr('zone.home', 'longitude') | default(5.000
+      , true) %}
+      {% set tilt = states('input_number.solar_tilt1') | float(0) %}
+      {% set az = states('input_number.solar_azimuth1') | float(0) %}
+      https://api.open-meteo.com/v1/forecast?latitude={{lat}}&longitude={{lon}}&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,pressure_msl,global_tilted_irradiance&daily=sunrise,sunset,sunshine_duration,uv_index_max,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_hours&models=knmi_harmonie_arome_netherlands&tilt={{tilt}}&azimuth={{az}}&timezone=Europe%2FAmsterdam&past_hours=24&forecast_hours=30
+    scan_interval: 3600
+    sensor:
+      - name: "KNMI Master Data Array 1"
+        unique_id: knmi_data_array_1
+        value_template: "OK"
+        json_attributes:
+          - hourly
+          - daily
+
+      # --- HOURLY SENSORS (Attached to Resource 1) ---
+      - name: "KNMI Temperature"
+        unique_id: knmi.temperature
+        # The | float(default=0) ensures it's always a number even if data is missing
+        value_template: >
+          {% set now_ts = as_timestamp(now()) %}
+          {% set hourly = value_json.hourly %}
+          {% if hourly is defined %}
+            {% set items = zip(hourly.time | map('as_timestamp'), hourly.temperature_2m) | list %}
+            {# Get the most recent data point that is NOT in the future #}
+            {% set current = items | selectattr(0, 'le', now_ts) | list | last %}
+            {{ current[1] | float(0) }}
+          {% else %}
+            0
+          {% endif %}
+        # This line prevents the error by hiding the sensor until data exists
+        availability: "{{ value_json is defined and 'hourly' in value_json }}"
+        unit_of_measurement: "\u00b0C"
+        device_class: temperature
+
+      - name: "KNMI Humidity"
+        unique_id: knmi.humidity
+        value_template: "{{ value_json.hourly.relative_humidity_2m[24] | float(default=0) }}"
+        availability: "{{ value_json is defined and 'hourly' in value_json }}"
+        unit_of_measurement: "%"
+        device_class: humidity
+
+      - name: "KNMI Pressure"
+        unique_id: knmi.pressure
+        value_template: "{{ value_json.hourly.pressure_msl[24] | float(default=0) }}"
+        availability: "{{ value_json is defined and 'hourly' in value_json }}"
+        unit_of_measurement: "hPa"
+        device_class: pressure
+
+      - name: "KNMI Dew Point"
+        unique_id: knmi.dew.point
+        value_template: "{{ value_json.hourly.dew_point_2m[24] }}"
+        unit_of_measurement: "\u00b0C"
+        device_class: temperature
+
+      # --- DAILY SENSORS (Attached to Resource 1) ---
+      - name: "KNMI Sunrise"
+        unique_id: knmi.sunrise
+        # We take the naive string and use as_local to attach your system's timezone
+        value_template: "{{ value_json.daily.sunrise[1] | as_datetime | as_local }}"
+        availability: "{{ value_json is mapping and 'daily' in value_json }}"
+        device_class: timestamp
+
+      - name: "KNMI Sunset"
+        unique_id: knmi.sunset
+        value_template: "{{ value_json.daily.sunset[1] | as_datetime | as_local }}"
+        availability: "{{ value_json is mapping and 'daily' in value_json }}"
+        device_class: timestamp
+
+      - name: "KNMI Max UV Index"
+        unique_id: knmi.max.uv.index
+        value_template: "{{ value_json.daily.uv_index_max[1] | float(default=0) }}"
+
+      - name: "KNMI Precipitation Today"
+        unique_id: knmi.precipitation.today
+        value_template: "{{ value_json.daily.precipitation_sum[1] | float(default=0) }}"
+        unit_of_measurement: "mm"
+
+      - name: "KNMI Precipitation Hours"
+        unique_id: knmi.precipitation.hours
+        value_template: "{{ value_json.daily.precipitation_hours[1] | float(default=0) }}"
+        unit_of_measurement: "h"
+
+      - name: "KNMI Temp Max Today"
+        unique_id: knmi.temp.max.today  
+        value_template: "{{ value_json.daily.temperature_2m_max[1] | float(default=0) }}"
+        availability: "{{ value_json is mapping and 'daily' in value_json }}"
+        unit_of_measurement: "\u00b0C"
+        device_class: temperature
+
+      - name: "KNMI Temp Min Today"
+        unique_id: knmi.temp.min.today
+        value_template: "{{ value_json.daily.temperature_2m_min[1] | float(default=0) }}"
+        availability: "{{ value_json is mapping and 'daily' in value_json }}"
+        unit_of_measurement: "\u00b0C"
+        device_class: temperature
+
+      - name: "KNMI Sunshine Duration"
+        unique_id: knmi.sunshine.duration
+        value_template: "{{ value_json.daily.sunshine_duration[1] | float(default=0) }}"
+        availability: "{{ value_json is mapping and 'daily' in value_json }}"
+        unit_of_measurement: "s"
+
+  # --- ARRAY 2: Only fetches Solar Data for Array 2 ---
+  # azimuth here is in -180 to +180 coordinate system from south
+  - resource_template: >
+      {% set lat = state_attr('zone.home', 'latitude') | default(52.138, true) %}
+      {% set lon = state_attr('zone.home', 'longitude') | default(5.379, true) %}
+      {% set tilt = states('input_number.solar_tilt2') | float(0) %}
+      {% set az = states('input_number.solar_azimuth2') | float(0) %}
+      https://api.open-meteo.com/v1/forecast?latitude={{lat}}&longitude={{lon}}&hourly=global_tilted_irradiance&models=knmi_harmonie_arome_netherlands&tilt={{tilt}}&azimuth={{az}}&timezone=Europe%2FAmsterdam&past_hours=24&forecast_hours=30
+    scan_interval: 3600
+    sensor:
+      - name: "KNMI Master Data Array 2"
+        unique_id: knmi_data_array_2
+        value_template: "OK"
+        json_attributes:
+          - hourly
+
+###########################################################################################################
+# Template
+###########################################################################################################
+
+template:
+  - sensor:
+
+    - name: "Solar Power PastForecast Watts"
+      unique_id: solar.power.pastforecast.watts
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      state: >
+        {% set hourly1 = state_attr('sensor.knmi_master_data_array_1', 'hourly') %}
+        {% set hourly2 = state_attr('sensor.knmi_master_data_array_2', 'hourly') %}
+          
+        {% if hourly1 and hourly2 %}
+          {% set hr = 24 %}
+          {# Safe float conversion for attributes #}
+          {% set gti1 = hourly1.global_tilted_irradiance[hr] | float(0) %}
+          {% set gti2 = hourly2.global_tilted_irradiance[hr] | float(0) %}
+          {% set temp_c = hourly1.temperature_2m[hr] | float(20) %}
+            
+          {# Retrieve Input Numbers #}
+          {% set count1 = states('input_number.solar_panel_count1') | float(1) %}
+          {% set count2 = states('input_number.solar_panel_count2') | float(1) %}
+          {% set wp = states('input_number.solar_panel_wp') | float(400) %}
+            
+          {# Efficiency is in %, convert to decimal #}
+          {% set eff_factor = 1 - (states('input_number.solar_loss_factor') | float(90) / 100.0) %}
+            
+          {# Temp Coeff is %/K (e.g. -0.4), convert to decimal (e.g. -0.004) #}
+          {% set temp_coeff_percent = states('input_number.solar_temp_coefficient') | float(-0.4) %}
+          {% set temp_correction = 1 + (temp_coeff_percent / 100.0) * (temp_c - 25) %}
+            
+          {% set offset = states('input_number.solar_offset') | float(5) %}
+            
+          {% set yield1 = max(0, gti1 - offset) / 1000.0 * count1 %}
+          {% set yield2 = max(0, gti2 - offset) / 1000.0 * count2 %}
+            
+          {% set total_power = (yield1 + yield2) * wp * eff_factor * temp_correction %}
+          {{ max(0, total_power) | round(0) }}
+        {% else %}
+          0
+        {% endif %}
+      attributes:
+        hourly_data: >
+          {% set h1 = state_attr('sensor.knmi_master_data_array_1', 'hourly') %}
+          {% set h2 = state_attr('sensor.knmi_master_data_array_2', 'hourly') %}
+            
+          {% if h1 and h2 %}
+            {% set ns = namespace(yields=[]) %}
+            {% set wp = states('input_number.solar_panel_wp') | float(400) %}
+            {% set eff_factor = 1 - (states('input_number.solar_loss_factor') | float(10) / 100.0) %}
+            {% set temp_coeff_dec = states('input_number.solar_temp_coefficient') | float(-0.4) / 100.0 %}
+            {% set offset = states('input_number.solar_offset') | float(5) %}
+            {% set c1 = states('input_number.solar_panel_count1') | float(0) %}
+            {% set c2 = states('input_number.solar_panel_count2') | float(0) %}
+
+            {% for i in range(0, h1.global_tilted_irradiance | length) %}
+              {% set gti1 = h1.global_tilted_irradiance[i] | float(0) %}
+              {% set gti2 = h2.global_tilted_irradiance[i] | float(0) %}
+              {% set temp_c = h1.temperature_2m[i] | float(20) %}
+                
+              {# Temperature Correction Factor #}
+              {% set temp_correction = 1 + (temp_coeff_dec * (temp_c - 25)) %}
+                
+              {% set y1 = max(0, gti1 - offset) / 1000.0 * c1 %}
+              {% set y2 = max(0, gti2 - offset) / 1000.0 * c2 %}
+
+              {% set power = (y1 + y2) * wp * eff_factor * temp_correction %}
+                
+              {# subtract 1 hour from the time string to set the average to the end of the hour instead of the start of the hour #}
+              {% set time_str = (h1.time[i] | as_datetime - timedelta(hours=1)).isoformat() %}
+              {% set ns.yields = ns.yields + [[time_str, max(0, power) | round(0)]] %}
+            {% endfor %}
+            {{ ns.yields }}
+          {% else %}
+            []
+          {% endif %}
+
+    - name: "Solar Energy Forecast 24H"
+      unique_id: solar_energy_forecast_24h
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total
+      state: >
+        {% set data = state_attr('sensor.solar_power_pastforecast_watts', 'hourly_data') %}
+        {% if data %}
+          {% set now_ts = as_timestamp(now()) %}
+          {% set ns = namespace(total=0, count=0) %}
+          {% for item in data %}
+            {% set item_ts = as_timestamp(item[0]) %}
+            {# If the hour is in the future AND we haven't reached 24 hours yet #}
+            {% if item_ts >= now_ts and ns.count < 24 %}
+              {% set ns.total = ns.total + (item[1] | float(0)) %}
+              {% set ns.count = ns.count + 1 %}
+            {% endif %}
+          {% endfor %}
+          {{ (ns.total / 1000) | round(2) }}
+        {% else %}
+          0
+        {% endif %}
+
+    - name: "Solar Energy Pastcast 24H"
+      unique_id: solar_energy_pastcast_24h
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total
+      state: >
+        {% set data = state_attr('sensor.solar_power_pastforecast_watts', 'hourly_data') %}
+        {% set current_hour_start = as_timestamp(now().replace(minute=0, second=0, microsecond=0)) %}
+        {% if data %}
+          {% set ns = namespace(total=0, count=0) %}
+          {# We reverse the data to get the most recent past hours first #}
+          {% for item in data | reverse if as_timestamp(item[0]) < current_hour_start and ns.count < 24 %}
+            {% set ns.total = ns.total + item[1] %}
+            {% set ns.count = ns.count + 1 %}
+          {% endfor %}
+          {{ (ns.total / 1000) | round(2) }}
+        {% else %}
+          0
+        {% endif %}
+
+    - name: "SolarEdge Relative Production vs Pastcast"
+      unique_id: solaredge_relative_production_vs_pastcast
+      unit_of_measurement: "%"
+      state_class: measurement
+      icon: mdi:solar-power-variant
+      # The 'state' handles the calculation
+      state: >
+        {% set a = states('sensor.solaredge_production_24h') | float(0) %}
+        {% set b = states('sensor.solar_energy_pastcast_24h') | float(0) %}
+        {% if b > 0 %}
+          {{ ((a / b) * 100) | round(0) }}
+        {% else %}
+          {{ none }}
+        {% endif %}
+      # The 'availability' ensures the sensor doesn't give false 0% readings
+      availability: >
+        {{ has_value('sensor.solaredge_production_24h') and 
+            has_value('sensor.solar_energy_pastcast_24h') }}
+
+    - name: "KNMI Sunrise Clock Time"
+      unique_id: knmi_sunrise_clock_time
+      icon: mdi:weather-sunset-up
+      state: >
+        {% set sunrise = states('sensor.knmi_sunrise') %}
+        {{ as_timestamp(sunrise) | timestamp_custom('%H:%M') }}
+
+    - name: "KNMI Sunset Clock Time"
+      unique_id: knmi_sunset_clock_time
+      icon: mdi:weather-sunset-down
+      state: >
+        {% set sunset = states('sensor.knmi_sunset') %}
+        {{ as_timestamp(sunset) | timestamp_custom('%H:%M') }}
+
+    - name: "Theoretical Clear Sky Power Forecast"
+      unique_id: theoretical_clear_sky_power_forecast
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      state: >
+        {% set data = state_attr('sensor.theoretical_clear_sky_power_forecast', 'hourly_data') %}
+        {% if data %}
+          {% set now_ts = as_timestamp(now()) %}
+          {% set ns = namespace(current_val=0) %}
+          {% for item in data %}
+            {# Match the current hour #}
+            {% if as_timestamp(item[0]) <= now_ts %}
+              {% set ns.current_val = item[1] %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.current_val }}
+        {% else %}
+          0
+        {% endif %}
+      attributes:
+        hourly_data: >
+          {% set master = state_attr('sensor.knmi_master_data_array_1', 'hourly') %}
+          {% if master and master.time is defined %}
+            {% set ns = namespace(yields=[]) %}
+            {% set pi = 3.141592653589793 %}
+            {# default solar constant is 1361 #}
+            {% set solarconst = 1361 %}
+            {# default atmospheric constant = 0.76 #}
+            {% set atmconst = 0.71 %}
+
+            {# --- INPUTS --- #}
+            {% set lat = state_attr('zone.home', 'latitude') | float(52.15) %}
+            {% set lon = state_attr('zone.home', 'longitude') | float(5.38) %}
+            {% set wp = states('input_number.solar_panel_wp') | float(400) %}
+            {% set eff = 1 - (states('input_number.solar_loss_factor') | float(10) / 100.0) %}
+            {% set t_coeff = states('input_number.solar_temp_coefficient') | float(-0.4) / 100.0 %}
+            {% set c1 = states('input_number.solar_panel_count1') | float(0) %}
+            {% set t1 = states('input_number.solar_tilt1') | float(0) %}
+            {% set a1 = states('input_number.solar_azimuth1') | float(0) %}
+            {% set c2 = states('input_number.solar_panel_count2') | float(0) %}
+            {% set t2 = states('input_number.solar_tilt2') | float(0) %}
+            {% set a2 = states('input_number.solar_azimuth2') | float(0) %}
+
+            {% for i in range(0, master.time | length) %}
+              {# 1. Match Yellow Line Timestamp Logic (No as_local here to avoid double-shifting) #}
+              {% set t_raw = master.time[i] | as_datetime %}
+              {% if t_raw is not none %}
+                {# shift time -30 min to take into account average of hour #}
+                {% set t = t_raw + timedelta(minutes=30) %}  
+                {% set day = t.strftime('%j') | int %}
+                  
+                {# 2. Accurate UTC Offset for LST #}
+                {% set tz_offset = (now().utcoffset().total_seconds() / 3600) %}
+                {% set lstm = 15 * tz_offset %}
+                  
+                {# 3. Solar Position #}
+                {% set b = (day - 1) * 360 / 365 %}
+                {% set eot = 229.2 * (0.000075 + 0.001868 * cos(b * pi / 180) - 0.032077 * sin(b * pi / 180) - 0.014615 * cos(2 * b * pi / 180) - 0.040849 * sin(2 * b * pi / 180)) %}
+                {% set tc = 4 * (lon - lstm) + eot %}
+                {% set lst = (t.hour + t.minute/60) + (tc / 60) %}
+                {% set hr_angle = 15 * (lst - 12) %}
+                {% set decl = 23.44 * sin(360 / 365 * (day + 284) * pi / 180) %}
+                  
+                {% set h_rad = asin(sin(lat * pi / 180) * sin(decl * pi / 180) + cos(lat * pi / 180) * cos(decl * pi / 180) * cos(hr_angle * pi / 180)) %}
+                {% set h_deg = h_rad * 180 / pi %}
+
+                {% if h_deg > 0 %}
+                  {# 1. Calculate Solar Intensity based on Day of Year #}
+                  {# Perihelion (closest to sun) is around Jan 3rd, hence (day - 3) #}
+                  {% set solar_const = solarconst * (1 + 0.03344 * cos(360 / 365.25 * (day - 3) * pi / 180)) %}
+                    
+                  {# 2. Air Mass calculation #}
+                  {% set am = 1 / (sin(h_rad) + 0.50572 * (max(0.01, h_deg) + 6.07995)**(-1.6364)) %}
+                    
+                  {# 3. Clear Sky Irradiance (using ~0.76 atmospheric transmissivity) #}
+                  {% set i_clear = solar_const * (atmconst**(am**0.678)) %}
+                    
+                  {# ... rest of your azimuth and power logic ... #}
+                    
+                  {# Robust Azimuth (-180 to 180 from South) #}
+                  {% set cos_az_n = (sin(decl * pi / 180) - sin(h_rad) * sin(lat * pi / 180)) / (cos(h_rad) * cos(lat * pi / 180)) %}
+                  {% set az_mag = acos(max(-1, min(1, cos_az_n))) * 180 / pi %}
+                  {% set azi_sun_n = az_mag if hr_angle < 0 else 360 - az_mag %}
+                  {% set azi_sun = azi_sun_n - 180 %}
+                    
+                  {# Incidence for both arrays #}
+                  {% set cos1 = sin(h_rad) * cos(t1 * pi / 180) + cos(h_rad) * sin(t1 * pi / 180) * cos((azi_sun - a1) * pi / 180) %}
+                  {% set cos2 = sin(h_rad) * cos(t2 * pi / 180) + cos(h_rad) * sin(t2 * pi / 180) * cos((azi_sun - a2) * pi / 180) %}
+                    
+                  {% set p1 = (i_clear * max(0, cos1) + (i_clear * 0.12)) / 1000.0 * c1 * wp %}
+                  {% set p2 = (i_clear * max(0, cos2) + (i_clear * 0.12)) / 1000.0 * c2 * wp %}
+                    
+                  {% set temp_c = master.temperature_2m[i] | float(20) %}
+                  {% set power = (p1 + p2) * eff * (1 + (t_coeff * (temp_c - 25))) %}
+                {% else %}
+                  {% set power = 0 %}
+                {% endif %}
+
+                {# 4. Crucial: Subtract 1 hour to align with Yellow Line chart logic #}
+                {# To match yellow line, we subtract the 30m offset plus the 1h chart lead #}
+                {% set time_str = (t - timedelta(hours=0.5)).isoformat() %}
+                {% set ns.yields = ns.yields + [[time_str, power | round(0)]] %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.yields }}
+          {% else %}
+            []
+          {% endif %}
