@@ -23,6 +23,15 @@ It fetches the required data from https://open-meteo.com/ API.
 For now it only uses the KNMI Harmonie Arome Netherlands model, which is suitable for most locations in north-west Europe. It has the advantage of reliable, high res Global Tilted Radiation.
 With all the data available, it calculates the expected solar energy production for the past and next 24h for your location, specific PV setup and weather circumstances like temperature.
 
+<img src="images/panel 1.jpg" width="1200">
+
+In the second tab you can find your historical median power consumption, and the expected energy sources for this median consumption.
+
+<img src="images/panel 2.jpg" width="1200">
+
+Please note that this excludes short but heavy loads way above the median observations. This is done because they are too unpredictable.
+This image also does not take into account a possible battery for temporary storage. This is future work.
+
 ## What's New?
 Release 0.1
 
